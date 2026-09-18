@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowRight } from 'lucide-react';
-import { Employee } from '../../types';
+import type { Employee } from '../../types';
 
 interface WorkloadDistributionProps {
   employees: Employee[];

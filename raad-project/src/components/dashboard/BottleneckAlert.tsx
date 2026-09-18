@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Sparkles, ArrowRight, X } from 'lucide-react';
+import { Sparkles, ArrowRight } from 'lucide-react';
 
 interface BottleneckAlertProps {
   onReviewRecommendation?: () => void;

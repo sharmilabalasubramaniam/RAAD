@@ -2,7 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
 import { Clock, ChevronRight } from 'lucide-react';
-import { SlaHealthSummary } from '../../types';
+import type { SlaHealthSummary } from '../../types';
 
 interface SlaHealthDonutProps {
   slaHealth: SlaHealthSummary;

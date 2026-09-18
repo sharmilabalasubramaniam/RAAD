@@ -1,4 +1,4 @@
-import { Employee, Task, Skill, AlertItem, SlaHealthSummary, ReallocationPlanData, ReportCard, ForecastDataPoint } from '../types';
+import type { Employee, Task, Skill, AlertItem, SlaHealthSummary, ReallocationPlanData, ReportCard, ForecastDataPoint } from '../types';
 
 export const mockEmployees: Employee[] = [
   {
