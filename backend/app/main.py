@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
 from datetime import datetime
-from .database import Base, engine, get_db
+from .database import Base, engine, SessionLocal, get_db
 from .models import Employee, Task, AuditEvent
 from .schemas import EmployeeCreate, TaskCreate
 from .allocation import find_best_employee, calculate_assignment_score, generate_explanation, calculate_skill_match
@@ -45,6 +45,21 @@ app = FastAPI(
     description="AI-powered workforce allocation, real-time precision telemetry, and reallocation system",
     version="1.0.0"
 )
+
+@app.on_event("startup")
+def auto_seed_on_startup():
+    db = SessionLocal()
+    try:
+        if db.query(Employee).count() == 0:
+            print("[Startup] Empty DB detected. Seeding demo dataset...")
+            import subprocess, sys, os
+            seed_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "seed.py")
+            if os.path.exists(seed_path):
+                subprocess.run([sys.executable, seed_path], check=False)
+    except Exception as e:
+        print(f"[Startup] Auto-seed check error: {e}")
+    finally:
+        db.close()
 
 # CORS configuration for frontend (http://localhost:5173) and agent (http://localhost:8001)
 app.add_middleware(
