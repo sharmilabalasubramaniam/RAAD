@@ -3,13 +3,42 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
 
+from datetime import datetime
 from .database import Base, engine, get_db
-from .models import Employee, Task
+from .models import Employee, Task, AuditEvent
 from .schemas import EmployeeCreate, TaskCreate
 from .allocation import find_best_employee, calculate_assignment_score, generate_explanation, calculate_skill_match
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
+
+def _record_audit_event(
+    db: Session,
+    action: str,
+    task_id: Optional[str] = None,
+    task_title: Optional[str] = None,
+    previous_employee_name: Optional[str] = None,
+    new_employee_name: Optional[str] = None,
+    reason: Optional[str] = None,
+    trigger: Optional[str] = None
+):
+    try:
+        event = AuditEvent(
+            timestamp=datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"),
+            action=action,
+            task_id=str(task_id) if task_id else None,
+            task_title=task_title,
+            previous_employee_name=previous_employee_name,
+            new_employee_name=new_employee_name,
+            reason=reason or "Automated RAAD Optimization Engine",
+            trigger=trigger or "Manager Interactive Reallocation",
+            status="Completed"
+        )
+        db.add(event)
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"[Audit] Failed to record audit event: {e}")
 
 app = FastAPI(
     title="AI Workforce Decision & Resource Allocation Agent API",
@@ -93,6 +122,8 @@ def create_employee(employee: EmployeeCreate, db: Session = Depends(get_db)):
 
 @app.get("/employees")
 @app.get("/workforce/workers")
+@app.get("/api/v1/employees")
+@app.get("/api/v1/workforce/workers")
 def get_employees(
     department: Optional[str] = None,
     skill: Optional[str] = None,
@@ -116,6 +147,8 @@ def get_employees(
 
 @app.get("/employees/{employee_id}")
 @app.get("/workforce/workers/{employee_id}")
+@app.get("/api/v1/employees/{employee_id}")
+@app.get("/api/v1/workforce/workers/{employee_id}")
 def get_employee_by_id(employee_id: int, db: Session = Depends(get_db)):
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
@@ -123,6 +156,7 @@ def get_employee_by_id(employee_id: int, db: Session = Depends(get_db)):
     return _format_employee(emp)
 
 @app.put("/employees/{employee_id}/availability")
+@app.put("/api/v1/employees/{employee_id}/availability")
 def update_employee_availability(employee_id: int, availability: bool, db: Session = Depends(get_db)):
     emp = db.query(Employee).filter(Employee.id == employee_id).first()
     if not emp:
@@ -199,6 +233,7 @@ def _format_task(task: Task, db: Session) -> Dict[str, Any]:
     }
 
 @app.post("/tasks")
+@app.post("/api/v1/tasks")
 def create_task(task: TaskCreate, db: Session = Depends(get_db)):
     new_task = Task(
         title=task.title,
@@ -215,11 +250,13 @@ def create_task(task: TaskCreate, db: Session = Depends(get_db)):
     return _format_task(new_task, db)
 
 @app.get("/tasks")
+@app.get("/api/v1/tasks")
 def get_tasks(db: Session = Depends(get_db)):
     tasks = db.query(Task).all()
     return [_format_task(t, db) for t in tasks]
 
 @app.get("/tasks/{task_id}")
+@app.get("/api/v1/tasks/{task_id}")
 def get_task_by_id(task_id: int, db: Session = Depends(get_db)):
     t = db.query(Task).filter(Task.id == task_id).first()
     if not t:
@@ -232,6 +269,8 @@ def get_task_by_id(task_id: int, db: Session = Depends(get_db)):
 
 @app.get("/tasks/{task_id}/recommendations")
 @app.get("/allocation/tasks/{task_id}/recommendations")
+@app.get("/api/v1/tasks/{task_id}/recommendations")
+@app.get("/api/v1/allocation/tasks/{task_id}/recommendations")
 def get_task_recommendations(task_id: int, limit: int = Query(default=3), db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
@@ -269,6 +308,8 @@ def get_task_recommendations(task_id: int, limit: int = Query(default=3), db: Se
 
 @app.post("/tasks/{task_id}/allocate")
 @app.post("/allocation/allocate")
+@app.post("/api/v1/tasks/{task_id}/allocate")
+@app.post("/api/v1/allocation/allocate")
 def allocate_task(task_id: int, worker_id: Optional[int] = None, db: Session = Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
@@ -284,11 +325,24 @@ def allocate_task(task_id: int, worker_id: Optional[int] = None, db: Session = D
     if not employee:
         return {"success": False, "message": "No available employee found"}
 
+    prev_emp = db.query(Employee).filter(Employee.id == task.assigned_employee_id).first() if task.assigned_employee_id else None
+
     task.assigned_employee_id = employee.id
     task.status = "Assigned"
     employee.workload = min(100.0, employee.workload + (task.estimated_hours / 40.0 * 100.0))
 
     db.commit()
+
+    _record_audit_event(
+        db=db,
+        action="REALLOCATE",
+        task_id=str(task.id),
+        task_title=task.title,
+        previous_employee_name=prev_emp.name if prev_emp else "Unassigned",
+        new_employee_name=employee.name,
+        reason=f"Skill match & SLA protection allocation to {employee.name}",
+        trigger="Manager Interactive Request"
+    )
 
     return {
         "success": True,
@@ -301,6 +355,7 @@ def allocate_task(task_id: int, worker_id: Optional[int] = None, db: Session = D
     }
 
 @app.post("/employees/{employee_id}/unavailable")
+@app.post("/api/v1/employees/{employee_id}/unavailable")
 def employee_unavailable(employee_id: int, db: Session = Depends(get_db)):
     employee = db.query(Employee).filter(Employee.id == employee_id).first()
     if not employee:
@@ -352,6 +407,8 @@ def employee_unavailable(employee_id: int, db: Session = Depends(get_db)):
 
 @app.get("/workforce/overview")
 @app.get("/workforce/metrics")
+@app.get("/api/v1/workforce/overview")
+@app.get("/api/v1/workforce/metrics")
 def workforce_overview(db: Session = Depends(get_db)):
     employees = db.query(Employee).all()
     tasks = db.query(Task).all()
@@ -385,6 +442,7 @@ def workforce_overview(db: Session = Depends(get_db)):
     }
 
 @app.get("/workforce/overloaded")
+@app.get("/api/v1/workforce/overloaded")
 def get_overloaded_employees(db: Session = Depends(get_db)):
     employees = db.query(Employee).filter(Employee.workload >= 80).order_by(Employee.workload.desc()).all()
     result = [_format_employee(e) for e in employees]
@@ -394,6 +452,7 @@ def get_overloaded_employees(db: Session = Depends(get_db)):
     }
 
 @app.get("/workforce/skills")
+@app.get("/api/v1/workforce/skills")
 def get_skills():
     return [
         {"id": "sk-1", "name": "AI/ML", "category": "Intelligence", "proficiency": 88, "totalEngineers": 6, "skillGapPercentage": 12, "demandLevel": "Critical", "targetCoverage": 95},
@@ -407,6 +466,7 @@ def get_skills():
     ]
 
 @app.get("/allocation/projects")
+@app.get("/api/v1/allocation/projects")
 def get_projects(db: Session = Depends(get_db)):
     tasks = db.query(Task).all()
     return [{
@@ -418,6 +478,7 @@ def get_projects(db: Session = Depends(get_db)):
     }]
 
 @app.get("/allocation/projects/{project_id}")
+@app.get("/api/v1/allocation/projects/{project_id}")
 def get_project_detail(project_id: str, db: Session = Depends(get_db)):
     tasks = db.query(Task).all()
     return {
@@ -428,6 +489,7 @@ def get_project_detail(project_id: str, db: Session = Depends(get_db)):
     }
 
 @app.post("/allocation/auto-optimize")
+@app.post("/api/v1/allocation/auto-optimize")
 def auto_optimize(db: Session = Depends(get_db)):
     unassigned = db.query(Task).filter(Task.assigned_employee_id == None).all()
     available = db.query(Employee).filter(Employee.availability == True).all()
@@ -452,6 +514,7 @@ def auto_optimize(db: Session = Depends(get_db)):
     return optimized
 
 @app.get("/allocation/conflicts")
+@app.get("/api/v1/allocation/conflicts")
 def get_conflicts(db: Session = Depends(get_db)):
     overloaded = db.query(Employee).filter(Employee.workload >= 80).all()
     critical_sla = db.query(Task).filter(Task.sla_hours <= 4).all()
@@ -480,6 +543,7 @@ def get_conflicts(db: Session = Depends(get_db)):
     return conflicts
 
 @app.post("/copilot/execute-tool")
+@app.post("/api/v1/copilot/execute-tool")
 def execute_copilot_tool(payload: Dict[str, Any], db: Session = Depends(get_db)):
     tool_name = payload.get("tool_name")
     params = payload.get("parameters", {})
@@ -494,3 +558,20 @@ def execute_copilot_tool(payload: Dict[str, Any], db: Session = Depends(get_db))
         return auto_optimize(db)
         
     return {"success": True, "executed_tool": tool_name, "parameters": params}
+
+@app.get("/audit-events")
+@app.get("/api/v1/audit-events")
+def get_audit_events(db: Session = Depends(get_db)):
+    events = db.query(AuditEvent).order_by(AuditEvent.id.desc()).limit(50).all()
+    return [{
+        "id": f"aud-{e.id}",
+        "timestamp": e.timestamp,
+        "action": e.action,
+        "task_id": e.task_id,
+        "task_title": e.task_title,
+        "previous_employee_name": e.previous_employee_name,
+        "new_employee_name": e.new_employee_name,
+        "reason": e.reason,
+        "trigger": e.trigger,
+        "status": e.status
+    } for e in events]

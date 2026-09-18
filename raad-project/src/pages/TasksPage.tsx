@@ -1,17 +1,58 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Clock, X } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { Search, Filter, Clock, Sparkles, UserPlus, Info } from 'lucide-react';
+import { TaskReallocateModal } from '../components/tasks/TaskReallocateModal';
+import { TaskReassignModal } from '../components/tasks/TaskReassignModal';
+import { TaskDetailsModal } from '../components/tasks/TaskDetailsModal';
+import { ToastContainer, type ToastMessage } from '../components/ui/Toast';
 import { apiService } from '../services/api';
-import type { Task } from '../types';
+import type { Task, Employee } from '../types';
 
 export const TasksPage: React.FC = () => {
+  const [searchParams] = useSearchParams();
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [employees, setEmployees] = useState<Employee[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState('ALL');
-  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+
+  // Task-specific modal states
+  const [taskToReallocate, setTaskToReallocate] = useState<Task | null>(null);
+  const [taskToReassign, setTaskToReassign] = useState<Task | null>(null);
+  const [taskToViewDetails, setTaskToViewDetails] = useState<Task | null>(null);
+
+  // Toast notification state
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const addToast = (title: string, message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    const id = `toast-${Date.now()}`;
+    setToasts((prev) => [...prev, { id, title, message, type }]);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   useEffect(() => {
-    apiService.getTasks().then(setTasks);
-  }, []);
+    Promise.all([
+      apiService.getTasks(),
+      apiService.getEmployees()
+    ]).then(([tData, eData]) => {
+      setTasks(tData);
+      setEmployees(eData);
+
+      // Check URL query parameters for selected task
+      const selectedId = searchParams.get('selected') || searchParams.get('task') || searchParams.get('query');
+      const reallocateId = searchParams.get('reallocate');
+
+      if (reallocateId) {
+        const found = tData.find(t => t.id === reallocateId || t.taskCode === reallocateId);
+        if (found) setTaskToReallocate(found);
+      } else if (selectedId) {
+        const found = tData.find(t => t.id === selectedId || t.taskCode === selectedId);
+        if (found) setTaskToViewDetails(found);
+      }
+    });
+  }, [searchParams]);
 
   const filteredTasks = tasks.filter((t) => {
     const matchesSearch = 
@@ -36,6 +77,11 @@ export const TasksPage: React.FC = () => {
     }
   };
 
+  const handleTaskUpdated = (updatedTask: Task, message: string) => {
+    setTasks((prev) => prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)));
+    addToast('Task Allocation Updated', message, 'success');
+  };
+
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12">
       
@@ -46,13 +92,13 @@ export const TasksPage: React.FC = () => {
             Active Task Matrix & SLA Horizon
           </h1>
           <p className="text-xs text-slate-600 mt-1">
-            72 sprint commitments monitored continuously for SLA breach risks and AI skill alignment.
+            {tasks.length} sprint commitments monitored continuously for SLA breach risks and AI skill alignment.
           </p>
         </div>
 
         <div className="flex items-center gap-2 font-mono text-xs">
           <span className="bg-rose-50 text-rose-800 border border-rose-200 px-3 py-1.5 rounded-lg font-bold">
-            5 SLA Critical Breaches
+            {tasks.filter(t => t.priority === 'Critical' || t.status === 'Critical Breach').length} SLA Critical Breaches
           </span>
         </div>
       </div>
@@ -91,8 +137,7 @@ export const TasksPage: React.FC = () => {
         {filteredTasks.map((task) => (
           <div
             key={task.id}
-            onClick={() => setSelectedTask(task)}
-            className="bg-white border border-slate-200/90 hover:border-blue-400 rounded-2xl p-5 shadow-xs transition hover:shadow-md cursor-pointer flex flex-col justify-between space-y-4"
+            className="bg-white border border-slate-200/90 hover:border-blue-400 rounded-2xl p-5 shadow-xs transition hover:shadow-md flex flex-col justify-between space-y-4"
           >
             <div className="space-y-2">
               <div className="flex items-center justify-between">
@@ -108,7 +153,7 @@ export const TasksPage: React.FC = () => {
               <p className="text-xs text-slate-500">{task.workstream}</p>
             </div>
 
-            <div className="pt-3 border-t border-slate-100 space-y-2 text-xs">
+            <div className="pt-3 border-t border-slate-100 space-y-2.5 text-xs">
               <div className="flex items-center justify-between text-slate-600">
                 <span className="text-slate-400 text-[11px]">Assignee:</span>
                 <div className="flex items-center gap-1.5 font-medium text-slate-900">
@@ -131,55 +176,67 @@ export const TasksPage: React.FC = () => {
                 <span className="text-slate-400">AI Skill Match:</span>
                 <span className="font-bold text-amber-800 font-mono">{task.aiSkillMatch}%</span>
               </div>
+
+              {/* Action Buttons: Problem 3 (Reallocate), Problem 4 (Reassign), Problem 5 (Details) */}
+              <div className="pt-2 border-t border-slate-100 flex items-center justify-between gap-1.5">
+                <button
+                  onClick={() => setTaskToReassign(task)}
+                  className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 text-[11px] font-semibold rounded-lg flex items-center gap-1 transition"
+                  title="Direct manual assignment"
+                >
+                  <UserPlus className="w-3 h-3 text-slate-500" />
+                  <span>Reassign</span>
+                </button>
+
+                <button
+                  onClick={() => setTaskToReallocate(task)}
+                  className="px-2.5 py-1 bg-[#795914] hover:bg-[#63480f] text-white text-[11px] font-semibold rounded-lg flex items-center gap-1 shadow-2xs transition cursor-pointer"
+                  title="Decision-oriented AI reallocation workflow"
+                >
+                  <Sparkles className="w-3 h-3" />
+                  <span>Reallocate</span>
+                </button>
+
+                <button
+                  onClick={() => setTaskToViewDetails(task)}
+                  className="px-2 py-1 bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 text-[11px] font-medium rounded-lg flex items-center gap-1 transition"
+                  title="View exact task details"
+                >
+                  <Info className="w-3 h-3 text-slate-400" />
+                  <span>Details</span>
+                </button>
+              </div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Task Modal Details */}
-      {selectedTask && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 max-w-lg w-full space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <span className="text-xs font-mono text-slate-400">{selectedTask.taskCode}</span>
-                <h3 className="text-lg font-bold font-serif text-slate-900">{selectedTask.taskName}</h3>
-              </div>
-              <button onClick={() => setSelectedTask(null)} className="p-1 text-slate-400 hover:text-slate-700">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {/* Task-Specific Modals */}
+      <TaskReallocateModal
+        task={taskToReallocate}
+        employees={employees}
+        isOpen={!!taskToReallocate}
+        onClose={() => setTaskToReallocate(null)}
+        onSuccess={handleTaskUpdated}
+      />
 
-            <p className="text-xs text-slate-600 leading-relaxed">{selectedTask.description}</p>
+      <TaskReassignModal
+        task={taskToReassign}
+        employees={employees}
+        isOpen={!!taskToReassign}
+        onClose={() => setTaskToReassign(null)}
+        onSuccess={handleTaskUpdated}
+      />
 
-            <div className="bg-slate-50 p-4 rounded-xl space-y-2 text-xs">
-              <div className="flex justify-between">
-                <span className="text-slate-500">Workstream:</span>
-                <span className="font-semibold text-slate-800">{selectedTask.workstream}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">Assignee:</span>
-                <span className="font-semibold text-slate-800">{selectedTask.assignedEmployeeName}</span>
-              </div>
-              <div className="flex justify-between font-mono">
-                <span className="text-slate-500">Remaining SLA:</span>
-                <span className="font-bold text-rose-700">{selectedTask.remainingSla}</span>
-              </div>
-              <div className="flex justify-between font-mono">
-                <span className="text-slate-500">AI Skill Fit:</span>
-                <span className="font-bold text-amber-800">{selectedTask.aiSkillMatch}%</span>
-              </div>
-            </div>
+      <TaskDetailsModal
+        task={taskToViewDetails}
+        isOpen={!!taskToViewDetails}
+        onClose={() => setTaskToViewDetails(null)}
+        onReallocate={(t) => setTaskToReallocate(t)}
+        onReassign={(t) => setTaskToReassign(t)}
+      />
 
-            <button
-              onClick={() => setSelectedTask(null)}
-              className="w-full py-2 bg-slate-900 text-white text-xs font-semibold rounded-lg hover:bg-slate-800 transition"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 };

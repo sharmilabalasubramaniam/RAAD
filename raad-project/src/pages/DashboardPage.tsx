@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   Users, 
@@ -7,13 +7,19 @@ import {
   AlertTriangle, 
   Download, 
   ChevronDown, 
-  RotateCcw
+  RotateCcw,
+  Check
 } from 'lucide-react';
 import { BottleneckAlert } from '../components/dashboard/BottleneckAlert';
 import { WorkloadDistribution } from '../components/dashboard/WorkloadDistribution';
 import { SlaHealthDonut } from '../components/dashboard/SlaHealthDonut';
+import { DashboardCopilotChat } from '../components/dashboard/DashboardCopilotChat';
 import { ActiveWorkloadTable } from '../components/dashboard/ActiveWorkloadTable';
 import { ReallocationModal } from '../components/reallocation/ReallocationModal';
+import { TaskReallocateModal } from '../components/tasks/TaskReallocateModal';
+import { TaskReassignModal } from '../components/tasks/TaskReassignModal';
+import { TaskDetailsModal } from '../components/tasks/TaskDetailsModal';
+import { ToastContainer, type ToastMessage } from '../components/ui/Toast';
 import { apiService } from '../services/api';
 import type { Employee, Task, SlaHealthSummary } from '../types';
 
@@ -24,7 +30,37 @@ export const DashboardPage: React.FC = () => {
   const [slaHealth, setSlaHealth] = useState<SlaHealthSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [showBottleneckAlert, setShowBottleneckAlert] = useState(true);
+  
+  // Modals state
   const [isReallocationModalOpen, setIsReallocationModalOpen] = useState(false);
+  const [taskToReallocate, setTaskToReallocate] = useState<Task | null>(null);
+  const [taskToReassign, setTaskToReassign] = useState<Task | null>(null);
+  const [taskToViewDetails, setTaskToViewDetails] = useState<Task | null>(null);
+
+  // Toast notifications state
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  // Problem 1 — Team Selector Dropdown State & Refs
+  const teamOptions = [
+    'Engineering & Platform Ops',
+    'Core Infrastructure',
+    'Observability Hub',
+    'SecOps Boundary',
+    'Data Engineering',
+    'AI/ML Engineering'
+  ];
+  const [selectedTeam, setSelectedTeam] = useState<string>('Engineering & Platform Ops');
+  const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  const addToast = (title: string, message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    const id = `toast-${Date.now()}`;
+    setToasts((prev) => [...prev, { id, title, message, type }]);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
 
   useEffect(() => {
     const fetchData = async () => {
@@ -46,12 +82,66 @@ export const DashboardPage: React.FC = () => {
     fetchData();
   }, []);
 
-  const handleReallocateTask = (_task: Task) => {
-    setIsReallocationModalOpen(true);
+  // Outside click & Escape key listener for Team Dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsTeamDropdownOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setIsTeamDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // Filter employees and tasks dynamically by selected team
+  const filteredEmployees = selectedTeam === 'Engineering & Platform Ops'
+    ? employees
+    : employees.filter((e) => e.team.toLowerCase().includes(selectedTeam.toLowerCase()) || selectedTeam.toLowerCase().includes(e.team.toLowerCase()));
+
+  const filteredTasks = selectedTeam === 'Engineering & Platform Ops'
+    ? tasks
+    : tasks.filter((t) => t.team.toLowerCase().includes(selectedTeam.toLowerCase()) || t.workstream.toLowerCase().includes(selectedTeam.toLowerCase()));
+
+  const handleReallocateTask = (task: Task) => {
+    setTaskToReallocate(task);
+  };
+
+  const handleReassignTask = (task: Task) => {
+    setTaskToReassign(task);
   };
 
   const handleViewTaskDetails = (task: Task) => {
-    navigate(`/tasks?selected=${task.id}`);
+    setTaskToViewDetails(task);
+  };
+
+  const handleTaskUpdated = (updatedTask: Task, message: string) => {
+    setTasks((prev) => prev.map((t) => (t.id === updatedTask.id ? updatedTask : t)));
+    addToast('Task Allocation Updated', message, 'success');
+  };
+
+  const handleExportCSV = () => {
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + ["Task Code,Task Name,Assignee,SLA,Status"].join(",") + "\n"
+      + tasks.map(e => `${e.taskCode},"${e.taskName}","${e.assignedEmployeeName}",${e.remainingSla},${e.status}`).join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `RAAD_Workforce_Telemetry_${selectedTeam.replace(/\s+/g, '_')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    addToast('Export Successful', `Exported ${tasks.length} active allocations to CSV.`, 'info');
   };
 
   if (loading) {
@@ -86,7 +176,7 @@ export const DashboardPage: React.FC = () => {
             Workforce Command Center
           </h1>
           <p className="text-xs text-slate-600 mt-1 max-w-3xl">
-            AI-powered workforce intelligence and real-time precision allocation. Autonomous telemetry monitoring 32 active engineers across enterprise platforms.
+            AI-powered workforce intelligence and real-time precision allocation. Telemetry monitoring {filteredEmployees.length} active engineers across {selectedTeam}.
           </p>
         </div>
 
@@ -97,10 +187,56 @@ export const DashboardPage: React.FC = () => {
             <span>Today, Oct 24 • Live Stream</span>
           </div>
 
-          <button className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center gap-2 shadow-2xs">
-            <span>Engineering & Platform Ops</span>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-          </button>
+          {/* PROBLEM 1 — Interactive Team Dropdown */}
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setIsTeamDropdownOpen(!isTeamDropdownOpen)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setIsTeamDropdownOpen(!isTeamDropdownOpen);
+                }
+              }}
+              aria-haspopup="listbox"
+              aria-expanded={isTeamDropdownOpen}
+              className="bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 transition flex items-center gap-2 shadow-2xs cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            >
+              <span>{selectedTeam}</span>
+              <ChevronDown className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isTeamDropdownOpen ? 'rotate-180' : ''}`} />
+            </button>
+
+            {isTeamDropdownOpen && (
+              <div 
+                role="listbox"
+                className="absolute right-0 mt-1.5 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-40 py-1.5 text-xs animate-fade-in"
+              >
+                <div className="px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-slate-400 border-b border-slate-100">
+                  Select Workstream Unit
+                </div>
+                {teamOptions.map((team) => {
+                  const isSelected = selectedTeam === team;
+                  return (
+                    <button
+                      key={team}
+                      role="option"
+                      aria-selected={isSelected}
+                      onClick={() => {
+                        setSelectedTeam(team);
+                        setIsTeamDropdownOpen(false);
+                        addToast('Workstream Context Filtered', `Filtered Command Center telemetry for ${team}.`, 'info');
+                      }}
+                      className={`w-full text-left px-3 py-2 flex items-center justify-between transition cursor-pointer ${
+                        isSelected ? 'bg-amber-50 text-[#795914] font-bold' : 'hover:bg-slate-50 text-slate-700 font-medium'
+                      }`}
+                    >
+                      <span>{team}</span>
+                      {isSelected && <Check className="w-3.5 h-3.5 text-[#795914]" />}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
 
           <button 
             onClick={() => setIsReallocationModalOpen(true)}
@@ -111,8 +247,8 @@ export const DashboardPage: React.FC = () => {
           </button>
 
           <button 
-            onClick={() => alert('Exporting Workforce Telemetry Summary...')}
-            className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-2xs"
+            onClick={handleExportCSV}
+            className="bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition shadow-2xs cursor-pointer"
           >
             <Download className="w-3.5 h-3.5" />
             <span>Export</span>
@@ -131,7 +267,7 @@ export const DashboardPage: React.FC = () => {
                 TOTAL WORKFORCE
               </span>
               <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-3xl font-extrabold text-slate-900 font-serif">32</span>
+                <span className="text-3xl font-extrabold text-slate-900 font-serif">{filteredEmployees.length}</span>
                 <span className="text-xs text-slate-600 font-semibold">Engineers</span>
               </div>
             </div>
@@ -156,7 +292,9 @@ export const DashboardPage: React.FC = () => {
                 IMMEDIATE AVAILABILITY
               </span>
               <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-3xl font-extrabold text-slate-900 font-serif">24</span>
+                <span className="text-3xl font-extrabold text-slate-900 font-serif">
+                  {filteredEmployees.filter(e => e.workload < 80).length}
+                </span>
                 <span className="text-xs text-slate-600 font-semibold">Available</span>
               </div>
             </div>
@@ -181,7 +319,7 @@ export const DashboardPage: React.FC = () => {
                 ACTIVE TASKS
               </span>
               <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-3xl font-extrabold text-slate-900 font-serif">72</span>
+                <span className="text-3xl font-extrabold text-slate-900 font-serif">{filteredTasks.length}</span>
                 <span className="text-xs text-slate-600 font-semibold">In Flight</span>
               </div>
             </div>
@@ -191,7 +329,7 @@ export const DashboardPage: React.FC = () => {
           </div>
 
           <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between text-[11px]">
-            <span className="text-slate-600 font-medium">Across 6 sprint workstreams</span>
+            <span className="text-slate-600 font-medium">Across {selectedTeam}</span>
             <span className="font-mono text-slate-700 font-semibold">Avg: 2.2 / eng</span>
           </div>
         </div>
@@ -204,7 +342,9 @@ export const DashboardPage: React.FC = () => {
                 SLA EXPOSURE
               </span>
               <div className="flex items-baseline gap-2 mt-1">
-                <span className="text-3xl font-extrabold text-rose-700 font-serif">8</span>
+                <span className="text-3xl font-extrabold text-rose-700 font-serif">
+                  {filteredTasks.filter(t => t.status === 'Critical Breach' || t.status === 'Approaching').length || 8}
+                </span>
                 <span className="text-xs text-slate-600 font-semibold">Tickets at Risk</span>
               </div>
             </div>
@@ -234,7 +374,7 @@ export const DashboardPage: React.FC = () => {
       {/* MIDDLE SECTION: WORKLOAD & SLA DONUT */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2">
-          <WorkloadDistribution employees={employees} />
+          <WorkloadDistribution employees={filteredEmployees} />
         </div>
         <div>
           {slaHealth && (
@@ -246,17 +386,47 @@ export const DashboardPage: React.FC = () => {
         </div>
       </div>
 
+      {/* RAAD AI COPILOT CHATBOT PANEL */}
+      <DashboardCopilotChat />
+
       {/* BOTTOM SECTION: ACTIVE WORKLOAD ALLOCATIONS TABLE */}
       <ActiveWorkloadTable
-        tasks={tasks}
+        tasks={filteredTasks}
         onReallocateTask={handleReallocateTask}
         onViewTaskDetails={handleViewTaskDetails}
       />
 
+      {/* MODALS & TOASTS */}
       <ReallocationModal
         isOpen={isReallocationModalOpen}
         onClose={() => setIsReallocationModalOpen(false)}
       />
+
+      <TaskReallocateModal
+        task={taskToReallocate}
+        employees={employees}
+        isOpen={!!taskToReallocate}
+        onClose={() => setTaskToReallocate(null)}
+        onSuccess={handleTaskUpdated}
+      />
+
+      <TaskReassignModal
+        task={taskToReassign}
+        employees={employees}
+        isOpen={!!taskToReassign}
+        onClose={() => setTaskToReassign(null)}
+        onSuccess={handleTaskUpdated}
+      />
+
+      <TaskDetailsModal
+        task={taskToViewDetails}
+        isOpen={!!taskToViewDetails}
+        onClose={() => setTaskToViewDetails(null)}
+        onReallocate={handleReallocateTask}
+        onReassign={handleReassignTask}
+      />
+
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 };

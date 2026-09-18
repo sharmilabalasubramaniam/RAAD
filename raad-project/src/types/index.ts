@@ -1,4 +1,4 @@
-export type WorkloadStatus = 'Overloaded' | 'Optimal Available' | 'Balanced' | 'Steady Load';
+export type WorkloadStatus = 'Overloaded' | 'Optimal Available' | 'Balanced' | 'Steady Load' | 'Unavailable';
 
 export interface Employee {
   id: string;

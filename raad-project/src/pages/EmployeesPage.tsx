@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Filter, Mail, MapPin, X } from 'lucide-react';
+import { Search, Filter, Mail, MapPin, X, UserX, UserCheck } from 'lucide-react';
 import { apiService } from '../services/api';
+import { ToastContainer, type ToastMessage } from '../components/ui/Toast';
 import type { Employee } from '../types';
 
 export const EmployeesPage: React.FC = () => {
@@ -8,10 +9,60 @@ export const EmployeesPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [teamFilter, setTeamFilter] = useState('ALL');
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [isUpdating, setIsUpdating] = useState(false);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+
+  const fetchEmployees = async () => {
+    try {
+      const data = await apiService.getEmployees();
+      setEmployees(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   useEffect(() => {
-    apiService.getEmployees().then(setEmployees);
+    fetchEmployees();
   }, []);
+
+  const addToast = (title: string, message: string, type: 'success' | 'error' | 'info' = 'success') => {
+    const id = `toast-${Date.now()}`;
+    setToasts((prev) => [...prev, { id, title, message, type }]);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  const handleToggleAvailability = async (emp: Employee) => {
+    setIsUpdating(true);
+    try {
+      if (emp.status === 'Overloaded' || emp.status === 'Steady Load' || emp.status === 'Balanced' || emp.status === 'Optimal Available') {
+        // Toggle availability via backend endpoint
+        const newAvailability = (emp.status as string) === 'Unavailable' ? true : false;
+        if (!newAvailability) {
+          const res = await apiService.markEmployeeUnavailable(emp.id);
+          addToast(
+            'Employee Marked Unavailable',
+            `Marked ${res.unavailable_employee || emp.name} unavailable. ${res.affected_tasks || 0} tasks evaluated for reallocation.`,
+            'info'
+          );
+        } else {
+          const res = await apiService.updateEmployeeAvailability(emp.id, true);
+          addToast('Availability Updated', res.message, 'success');
+        }
+      }
+      await fetchEmployees();
+      if (selectedEmployee && selectedEmployee.id === emp.id) {
+        const updated = (await apiService.getEmployees()).find(e => e.id === emp.id);
+        if (updated) setSelectedEmployee(updated);
+      }
+    } catch (err) {
+      addToast('Update Failed', 'Failed to update employee status.', 'error');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
 
   const filteredEmployees = employees.filter((emp) => {
     const matchesSearch = 
@@ -32,6 +83,8 @@ export const EmployeesPage: React.FC = () => {
         return 'bg-sky-100 text-sky-800 border-sky-200 font-semibold';
       case 'Steady Load':
         return 'bg-amber-100 text-amber-800 border-amber-200 font-semibold';
+      case 'Unavailable':
+        return 'bg-slate-200 text-slate-700 border-slate-300 font-bold';
       default:
         return 'bg-slate-100 text-slate-700 border-slate-200 font-semibold';
     }
@@ -53,7 +106,7 @@ export const EmployeesPage: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <span className="text-xs font-mono bg-blue-50 text-blue-800 px-3 py-1.5 rounded-lg border border-blue-200 font-bold">
-            32 Active Engineers
+            {employees.length} Active Engineers
           </span>
         </div>
       </div>
@@ -84,7 +137,7 @@ export const EmployeesPage: React.FC = () => {
             <option value="Core Infrastructure">Core Infrastructure</option>
             <option value="Observability Hub">Observability Hub</option>
             <option value="SecOps Boundary">SecOps Boundary</option>
-            <option value="Data Infra & Telemetry">Data Infra & Telemetry</option>
+            <option value="Engineering">Engineering</option>
           </select>
         </div>
       </div>
@@ -101,7 +154,7 @@ export const EmployeesPage: React.FC = () => {
                 <th className="py-3 px-4">WORKLOAD</th>
                 <th className="py-3 px-4">CAPACITY</th>
                 <th className="py-3 px-4">STATUS</th>
-                <th className="py-3 px-4 text-right">ACTION</th>
+                <th className="py-3 px-4 text-right">ACTIONS</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -162,12 +215,36 @@ export const EmployeesPage: React.FC = () => {
                   </td>
 
                   <td className="py-3 px-4 text-right">
-                    <button
-                      onClick={() => setSelectedEmployee(emp)}
-                      className="text-xs font-semibold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1 rounded-lg transition"
-                    >
-                      View Profile
-                    </button>
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={() => handleToggleAvailability(emp)}
+                        disabled={isUpdating}
+                        className={`text-xs font-semibold px-2.5 py-1 rounded-lg border transition flex items-center gap-1 ${
+                          (emp.status as string) === 'Unavailable' 
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                            : 'bg-rose-50 text-rose-700 border-rose-200 hover:bg-rose-100'
+                        }`}
+                      >
+                        {(emp.status as string) === 'Unavailable' ? (
+                          <>
+                            <UserCheck className="w-3 h-3" />
+                            <span>Make Available</span>
+                          </>
+                        ) : (
+                          <>
+                            <UserX className="w-3 h-3" />
+                            <span>Make Unavailable</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => setSelectedEmployee(emp)}
+                        className="text-xs font-semibold text-blue-700 hover:text-blue-900 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-3 py-1 rounded-lg transition"
+                      >
+                        View Profile
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -242,15 +319,30 @@ export const EmployeesPage: React.FC = () => {
               </div>
             </div>
 
-            <button
-              onClick={() => setSelectedEmployee(null)}
-              className="w-full py-2 bg-slate-900 text-white rounded-lg text-xs font-semibold hover:bg-slate-800 transition"
-            >
-              Close Profile
-            </button>
+            <div className="space-y-2 pt-4 border-t border-slate-100">
+              <button
+                onClick={() => handleToggleAvailability(selectedEmployee)}
+                className={`w-full py-2 text-xs font-semibold rounded-lg transition flex items-center justify-center gap-1.5 ${
+                  (selectedEmployee.status as string) === 'Unavailable' 
+                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white' 
+                    : 'bg-rose-600 hover:bg-rose-700 text-white'
+                }`}
+              >
+                {(selectedEmployee.status as string) === 'Unavailable' ? 'Make Employee Available' : 'Mark Employee Unavailable'}
+              </button>
+
+              <button
+                onClick={() => setSelectedEmployee(null)}
+                className="w-full py-2 bg-slate-100 text-slate-700 rounded-lg text-xs font-semibold hover:bg-slate-200 transition"
+              >
+                Close Profile
+              </button>
+            </div>
           </div>
         </div>
       )}
+
+      <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </div>
   );
 };

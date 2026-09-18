@@ -185,20 +185,21 @@ class LLMService:
                 lines.append("\n💡 *Recommendation*: Reassign surplus hours using the allocation engine to prevent delivery bottlenecks.")
                 msg = "\n".join(lines)
 
-        # 2. Workforce summary
-        elif any(w in lower for w in ["workforce summary", "health summary", "headcount", "kpi", "overview"]):
+        # 2. Workforce summary & Available employees
+        elif any(w in lower for w in ["workforce summary", "health summary", "headcount", "kpi", "overview", "available", "how many employees"]):
             tool_res = await get_workforce_summary()
             tool_calls.append({"id": "call_summary", "name": "get_workforce_summary", "arguments": {}})
             actions_taken.append({"tool": "get_workforce_summary", "output": tool_res})
 
             m = tool_res.get("metrics", {})
             if tool_res.get("success") and not m.get("error"):
+                avail_count = m.get("underallocated_workers", 0) + (m.get("active_workers", 0) - m.get("overallocated_workers", 0))
                 lines = [
-                    f"📊 **ResourcePulse Workforce Summary**\n",
+                    f"📊 **ResourcePulse Workforce & Availability Report**\n",
                     f"- **Total Headcount**: {m.get('total_workers')} ({m.get('active_workers')} active)",
+                    f"- **Available / Unblocked Engineers**: **{m.get('underallocated_workers')} under-capacity**, {m.get('active_workers')} total active",
                     f"- **Average Utilization**: **{m.get('avg_utilization_pct')}%**",
                     f"- **Over-allocated Staff**: {m.get('overallocated_workers')}",
-                    f"- **Under-allocated Staff**: {m.get('underallocated_workers')}",
                     f"- **Skills Tracked**: {m.get('total_skills_tracked')}\n",
                     f"**Department Breakdown**:"
                 ]
@@ -208,27 +209,44 @@ class LLMService:
             else:
                 msg = f"⚠️ Could not retrieve workforce summary: {tool_res.get('error', 'Backend unreachable')}"
 
-        # 3. Unassigned tasks
-        elif any(w in lower for w in ["unassigned tasks", "unassigned", "backlog", "unstaffed tasks"]):
-            tool_res = await list_unassigned_tasks()
-            tool_calls.append({"id": "call_unassigned", "name": "list_unassigned_tasks", "arguments": {}})
-            actions_taken.append({"tool": "list_unassigned_tasks", "output": tool_res})
+        # 3. Highest priority task assignment / Who should handle
+        elif any(w in lower for w in ["highest priority", "who should handle", "priority task"]):
+            tool_res = await check_critical_task_capacity()
+            tool_calls.append({"id": "call_critical_cap", "name": "check_critical_task_capacity", "arguments": {}})
+            actions_taken.append({"tool": "check_critical_task_capacity", "output": tool_res})
 
-            tasks = tool_res.get("unassigned_tasks", [])
-            if not tasks:
-                msg = "🎉 **All tasks are currently staffed!** There are no unassigned backlog items."
-            else:
-                lines = [f"📋 **Found {len(tasks)} unassigned task(s) needing staffing:**\n"]
-                for t in tasks:
-                    skills_str = ", ".join(t["required_skills"]) if t["required_skills"] else "None specified"
+            assessments = tool_res.get("task_assessments", [])
+            lines = [f"🎯 **Highest Priority Task Staffing Recommendations**:\n"]
+            if assessments:
+                for a in assessments[:3]:
+                    status_str = f"Assigned to **{a.get('assigned_worker_name')}**" if a.get("is_assigned") else "⚠️ **Unassigned - Requires Staffing**"
                     lines.append(
-                        f"- **{t['title']}** (ID: `{t['task_id']}`)\n"
-                        f"  - **Project**: {t['project_name']} | **Priority**: {t['priority']}\n"
-                        f"  - **Commitment**: {t['required_hours_per_week']} hrs/wk (Est: {t['estimated_total_hours']} hrs)\n"
-                        f"  - **Required Skills**: {skills_str}\n"
-                        f"  - **Timeline**: {t['timeline']}"
+                        f"- **{a['title']}** (Priority: **{a['priority']}** | Project: *{a['project_name']}*)\n"
+                        f"  - **Status**: {status_str}\n"
+                        f"  - **Commitment**: {a['needed_hours']} hrs/wk\n"
+                        f"  - **Viable Candidate Matches**: {len(a['viable_candidates'])} engineers with matching skills"
                     )
-                lines.append("\n💡 *Ask*: 'Who can handle this task?' with a task ID to view candidate recommendations.")
+            else:
+                lines.append("No active critical/high priority tasks requiring allocation changes.")
+            msg = "\n".join(lines)
+
+        # 4. Tasks at risk / SLA Risk
+        elif any(w in lower for w in ["at risk", "tasks at risk", "sla risk", "breach"]):
+            tool_res = await list_workforce_conflicts(unresolved_only=True)
+            tool_calls.append({"id": "call_conflicts", "name": "list_workforce_conflicts", "arguments": {"unresolved_only": True}})
+            actions_taken.append({"tool": "list_workforce_conflicts", "output": tool_res})
+
+            conflicts = tool_res.get("conflicts", [])
+            if not conflicts:
+                msg = "✅ **Zero tasks currently at SLA risk!** All active assignments adhere to capacity and deadline constraints."
+            else:
+                lines = [f"⚠️ **Detected {len(conflicts)} Task(s) & Allocations at Risk:**\n"]
+                for c in conflicts[:10]: # Limit to top 10 for clean readable response
+                    worker = c.get('worker_name') or 'Unassigned'
+                    lines.append(f"- **{worker}** [{c.get('severity', 'Risk')}]: {c.get('details', 'Risk detected')}")
+                if len(conflicts) > 10:
+                    lines.append(f"\n*...and {len(conflicts) - 10} additional items.*")
+                lines.append("\n💡 *Action*: Click Reallocate or run auto-optimization to eliminate risk exposure.")
                 msg = "\n".join(lines)
 
         # 4. Absence impact: "[Name] is unavailable. What tasks are affected?"

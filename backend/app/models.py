@@ -48,3 +48,18 @@ class Task(Base):
         Integer,
         nullable=True
     )
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    timestamp = Column(String, nullable=False)
+    action = Column(String, nullable=False)
+    task_id = Column(String, nullable=True)
+    task_title = Column(String, nullable=True)
+    previous_employee_name = Column(String, nullable=True)
+    new_employee_name = Column(String, nullable=True)
+    reason = Column(String, nullable=True)
+    trigger = Column(String, nullable=True)
+    status = Column(String, default="Completed")
