@@ -80,9 +80,11 @@ async def agent_chat(payload: ChatRequest):
         raise HTTPException(status_code=500, detail=f"Agent service error: {str(e)}")
 
 if __name__ == "__main__":
+    import os
+    port = int(os.getenv("PORT", settings.AGENT_PORT))
     uvicorn.run(
         "main:app",
         host=settings.AGENT_HOST,
-        port=settings.AGENT_PORT,
-        reload=True
+        port=port,
+        reload=False
     )
