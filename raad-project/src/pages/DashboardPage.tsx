@@ -42,6 +42,7 @@ export const DashboardPage: React.FC = () => {
 
   // Problem 1 — Team Selector Dropdown State & Refs
   const teamOptions = [
+    'All Departments (100 Employees)',
     'Engineering & Platform Ops',
     'Core Infrastructure',
     'Observability Hub',
@@ -49,7 +50,7 @@ export const DashboardPage: React.FC = () => {
     'Data Engineering',
     'AI/ML Engineering'
   ];
-  const [selectedTeam, setSelectedTeam] = useState<string>('Engineering & Platform Ops');
+  const [selectedTeam, setSelectedTeam] = useState<string>('All Departments (100 Employees)');
   const [isTeamDropdownOpen, setIsTeamDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -105,11 +106,11 @@ export const DashboardPage: React.FC = () => {
   }, []);
 
   // Filter employees and tasks dynamically by selected team
-  const filteredEmployees = selectedTeam === 'Engineering & Platform Ops'
+  const filteredEmployees = (selectedTeam === 'All Departments (100 Employees)')
     ? employees
     : employees.filter((e) => e.team.toLowerCase().includes(selectedTeam.toLowerCase()) || selectedTeam.toLowerCase().includes(e.team.toLowerCase()));
 
-  const filteredTasks = selectedTeam === 'Engineering & Platform Ops'
+  const filteredTasks = (selectedTeam === 'All Departments (100 Employees)')
     ? tasks
     : tasks.filter((t) => t.team.toLowerCase().includes(selectedTeam.toLowerCase()) || t.workstream.toLowerCase().includes(selectedTeam.toLowerCase()));
 
