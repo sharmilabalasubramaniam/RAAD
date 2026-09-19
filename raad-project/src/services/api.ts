@@ -20,8 +20,8 @@ import {
   mockForecastData 
 } from '../data/mockData';
 
-const API_BASE_URL = (import.meta.env.VITE_API_URL || 'http://localhost:8000').replace(/\/$/, '');
-const AGENT_BASE_URL = (import.meta.env.VITE_AGENT_URL || 'http://localhost:8001').replace(/\/$/, '');
+const API_BASE_URL = (import.meta.env.VITE_API_URL || 'https://raad-5iv8.onrender.com/api/v1').replace(/\/$/, '');
+const AGENT_BASE_URL = (import.meta.env.VITE_AGENT_URL || 'https://raad-agent.onrender.com').replace(/\/$/, '');
 
 class ApiService {
   private async safeFetch<T>(url: string, options?: RequestInit): Promise<T | null> {
